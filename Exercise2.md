@@ -114,9 +114,9 @@ FGraph = graph_from_data_frame(d=Data,vertices=NULL ,directed=FALSE)
 FGraph
 ```
 
-    ## IGRAPH 8ba49ff UN-- 10 17 -- 
+    ## IGRAPH eb3272b UN-- 10 17 -- 
     ## + attr: name (v/c), edge (e/n)
-    ## + edges from 8ba49ff (vertex names):
+    ## + edges from eb3272b (vertex names):
     ##  [1] 1--2 2--A A--B A--C B--C B--D B--6 B--3 D--6 D--3 D--C D--5 5--6 5--3 C--3
     ## [16] C--4 3--4
 
@@ -153,7 +153,7 @@ ggraph(FGraph) +
 
     ## Using `stress` as default layout
 
-![](Exercise2_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+![](Exercise2_files/figure-gfm/fGRAPH-1.png)<!-- -->
 
 Using the above graph and the calculated measures, there are various
 insights. Seats B, C and D have degrees of 5 in centrality. This would
