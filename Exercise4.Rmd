@@ -1,0 +1,307 @@
+---
+title: "Exercise 4"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r eval=TRUE}
+library(tidygraph)
+```
+
+```{r eval=TRUE}
+library(scales)
+```
+
+```{r eval=TRUE}
+library(ggplot2)
+```
+
+```{r eval=TRUE}
+library(mice)
+```
+
+```{r eval=TRUE}
+library(tidyverse)
+```
+
+```{r eval=TRUE}
+library(ggraph)
+```
+
+```{r eval=TRUE}
+library(igraph)
+```
+
+```{r eval=TRUE}
+library(arrow)
+```
+
+```{r eval=TRUE}
+library(dplyr)
+```
+
+```{r eval=TRUE}
+library(gridExtra)
+```
+
+```{r eval=TRUE}
+Apps <- read_parquet('/Users/Brock/Downloads/app_data_sample.parquet')
+Edges <- read.csv('/Users/Brock/Downloads/edges_sample.csv')
+
+```
+
+##Gender
+
+```{r eval=TRUE}
+exnames <- Apps %>% distinct(examiner_name_first)
+
+exnames
+
+```
+
+```{r eval=TRUE}
+#install_genderdata_package() 
+library(gender)
+```
+
+```{r eval=TRUE}
+exnames_gender <- exnames %>% 
+  do(results = gender(.$examiner_name_first, method = "ssa")) %>% 
+  unnest(cols = c(results), keep_empty = TRUE) %>% 
+  select(
+    examiner_name_first = name,
+    gender,
+    proportion_female
+  )
+
+```
+
+
+```{r eval=TRUE}
+Apps <- Apps %>% 
+  left_join(exnames_gender, by = "examiner_name_first")
+
+```
+
+## Race
+
+```{r eval=TRUE}
+library(wru)
+
+```
+
+```{r eval=TRUE}
+ex_surnames <- Apps %>% 
+  select(surname = examiner_name_last) %>% 
+  distinct()
+```
+
+```{r eval=TRUE}
+ex_race <- predict_race(voter.file = ex_surnames, surname.only = T) %>% 
+  as_tibble()
+```
+
+```{r eval=TRUE}
+ex_race <- ex_race %>% 
+  mutate(max_race_p = pmax(pred.asi, pred.bla, pred.his, pred.oth, pred.whi)) %>% 
+  mutate(race = case_when(
+    max_race_p == pred.asi ~ "Asian",
+    max_race_p == pred.bla ~ "black",
+    max_race_p == pred.his ~ "Hispanic",
+    max_race_p == pred.oth ~ "other",
+    max_race_p == pred.whi ~ "white",
+    TRUE ~ NA_character_
+  ))
+
+```
+
+```{r eval=TRUE}
+Apps <- Apps %>% 
+  left_join(ex_race, by = c("examiner_name_last" = "surname"))
+
+```
+
+## Tenure
+
+```{r eval=TRUE}
+library(lubridate) 
+```
+
+```{r eval=TRUE}
+ex_dates <- Apps %>% 
+  select(examiner_id, filing_date, appl_status_date) 
+
+```
+
+```{r eval=TRUE}
+ex_dates <- ex_dates %>% 
+  mutate(start_date = ymd(filing_date), end_date = as_date(dmy_hms(appl_status_date)))
+
+```
+
+```{r eval=TRUE}
+ex_dates <- ex_dates %>% 
+  group_by(examiner_id) %>% 
+  summarise(
+    earliest_date = min(start_date, na.rm = TRUE), 
+    latest_date = max(end_date, na.rm = TRUE),
+    tenure_days = interval(earliest_date, latest_date) %/% days(1)
+    ) %>% 
+  filter(year(latest_date)<2018)
+
+```
+
+```{r eval=TRUE}
+Apps <- Apps %>% 
+  left_join(ex_dates, by = "examiner_id")
+
+```
+
+## Application Processing Time
+
+#Clean
+
+
+
+```{r eval=TRUE}
+Apps$appl_end_date <- paste(Apps$patent_issue_date, Apps$abandon_date, sep=',')
+
+```
+
+```{r eval=TRUE}
+Apps$appl_end_date <- gsub('NA', "", as.character(Apps$appl_end_date))
+Apps$appl_end_date <- gsub(',', "", as.character(Apps$appl_end_date))
+
+
+```
+
+```{r eval=TRUE}
+Apps$appl_end_date <- as.Date(Apps$appl_end_date, format="%Y-%m-%d")
+Apps$filing_date <- as.Date(Apps$filing_date, format="%Y-%m-%d")
+
+
+```
+
+```{r eval=TRUE}
+Apps$appl_proc_days <- as.numeric(difftime(Apps$appl_end_date, Apps$filing_date, units=c("days")))
+
+```
+
+```{r eval=TRUE}
+Apps <- Apps %>% filter(appl_proc_days >=0 | appl_proc_days != NA)
+
+```
+
+```{r eval=TRUE}
+Apps_model <- subset(Apps, select = -c(filing_date, abandon_date, earliest_date, appl_end_date, appl_status_date, patent_issue_date, latest_date, examiner_name_middle, patent_number))
+
+```
+
+```{r eval=TRUE}
+sapply(Apps_model, function(x) sum(is.na(x)))
+```
+
+```{r eval=TRUE}
+Apps_model <- Apps_model %>% drop_na(examiner_id)
+
+```
+
+```{r eval=TRUE}
+Apps_model$gender <- as.factor(Apps_model$gender)
+
+
+```
+
+## Network
+
+```{r eval=TRUE}
+examiner_aus = distinct(subset(Apps_model, select=c(examiner_art_unit, examiner_id)))
+
+```
+
+```{r eval=TRUE}
+examiner_aus$wg = substr(examiner_aus$examiner_art_unit, 1,3)
+
+```
+
+```{r eval=TRUE}
+examiner_aus = examiner_aus[examiner_aus$wg==164 | examiner_aus$wg==174,]
+
+```
+
+```{r eval=TRUE}
+networkanl = merge(x=edges, y=examiner_aus, by.x="ego_examiner_id", by.y="examiner_id", all.x=TRUE)
+networkanl = networkanl %>% rename(ego_art_unit=examiner_art_unit, ego_wg=wg)
+
+```
+
+
+```{r eval=TRUE}
+networkanl = drop_na(networkanl)
+
+```
+
+```{r eval=TRUE}
+networkanl = merge(x=networkanl, y=examiner_aus, by.x="alter_examiner_id", by.y="examiner_id", all.x=TRUE)
+networkanl = networkanl %>% rename(alter_art_unit=examiner_art_unit, alter_wg=wg)
+networkanl = drop_na(networkanl)
+
+```
+
+```{r eval=TRUE}
+egoNodes = subset(networkanl, select=c(ego_examiner_id,ego_art_unit, ego_wg)) %>% rename(examiner_id=ego_examiner_id,art_unit=ego_art_unit,wg=ego_wg)
+alterNodes = subset(networkanl, select=c(alter_examiner_id,alter_art_unit, alter_wg))%>% rename(examiner_id=alter_examiner_id,art_unit=alter_art_unit,wg=alter_wg)
+nodes = rbind(egoNodes, alterNodes)
+nodes = distinct(nodes)
+
+```
+
+```{r eval=TRUE}
+nodes = nodes %>% group_by(examiner_id) %>% summarise(examiner_id=first(examiner_id), art_unit=first(art_unit), wg=first(wg))
+network <- graph_from_data_frame(d=networkanl, vertices=nodes, directed=TRUE)
+network
+
+```
+
+```{r eval=TRUE}
+Degree <- degree(network)
+Closeness <- closeness(network)
+Betweenness <- betweenness(network)
+Eig <- evcent(network)$vector
+centrality <- data.frame(nodes, Degree, Eig, Closeness, Betweenness)   
+centrality 
+
+```
+
+```{r eval=TRUE}
+Apps_final <- merge(x=Apps_model, y=centrality, by='examiner_id', all.x=TRUE)
+
+```
+
+```{r eval=TRUE}
+Apps_final = Apps_final %>% filter(wg==164 | wg==174)
+
+```
+
+```{r eval=TRUE}
+Apps_final <- drop_na(Apps_final)
+
+```
+
+```{r eval=TRUE}
+lm1 <- lm(appl_proc_days~Eig + Degree + Closeness + Betweenness + gender + tenure_days, data=Apps_final)
+summary(lm1)
+
+```
+
+```{r eval=TRUE}
+lm2 <- lm(appl_proc_days~Eig + Degree + Closeness + Betweenness + gender + tenure_days + Degree*gender + Eig*gender + Closeness*gender + Betweenness*gender, data=Apps_final)
+summary(lm2)
+
+
+```
+
+
